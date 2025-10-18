@@ -1,72 +1,124 @@
 "use client"
 
-import React, { useRef } from "react"
-import { Canvas, useFrame, useThree } from "@react-three/fiber"
-import { OrbitControls, Environment, MeshTransmissionMaterial } from "@react-three/drei"
+import React, { useRef, useMemo, useCallback, memo } from "react"
+import { Canvas, useFrame, useThree, extend } from "@react-three/fiber"
+import { OrbitControls, Environment, MeshTransmissionMaterial, Instances, Instance } from "@react-three/drei"
 import { useControls, folder, LevaPanel, useCreateStore } from 'leva'
 import * as THREE from "three"
 
-function GlassStructure({ controls }) {
+const GlassStructure = memo(function GlassStructure({ controls }) {
   const groupRef = useRef()
-  const { scene } = useThree()
   
-  useFrame((state) => {
+
+  
+  // Memoize material to prevent recreation
+  const glassMaterial = useMemo(() => (
+    <MeshTransmissionMaterial
+      transmission={controls.transmission}
+      thickness={controls.thickness}
+      roughness={controls.roughness}
+      envMapIntensity={controls.envMapIntensity}
+      clearcoat={controls.clearcoat}
+      clearcoatRoughness={controls.clearcoatRoughness}
+      ior={controls.ior}
+      reflectivity={controls.reflectivity}
+      color={controls.glassColor}
+      transparent={true}
+      chromaticAberration={0.2}
+      opacity={1.0}
+    />
+  ), [controls.transmission, controls.thickness, controls.roughness, controls.envMapIntensity, 
+      controls.clearcoat, controls.clearcoatRoughness, controls.ior, controls.reflectivity, controls.glassColor])
+  
+  // Optimize rotation updates - only update when values change
+  const rotationRef = useRef({ x: 0, y: 0, z: 0 })
+  
+  useFrame(() => {
     if (groupRef.current) {
-      groupRef.current.rotation.x = THREE.MathUtils.degToRad(controls.glassRotationX)
-      groupRef.current.rotation.y = THREE.MathUtils.degToRad(controls.glassRotationY)
-      groupRef.current.rotation.z = THREE.MathUtils.degToRad(controls.glassRotationZ)
+      const newX = THREE.MathUtils.degToRad(controls.glassRotationX)
+      const newY = THREE.MathUtils.degToRad(controls.glassRotationY)
+      const newZ = THREE.MathUtils.degToRad(controls.glassRotationZ)
+      
+      if (rotationRef.current.x !== newX || rotationRef.current.y !== newY || rotationRef.current.z !== newZ) {
+        groupRef.current.rotation.set(newX, newY, newZ)
+        rotationRef.current = { x: newX, y: newY, z: newZ }
+      }
     }
   })
 
+  // Memoize cylinder positions to prevent recalculation
+  const cylinderPositions = useMemo(() => {
+    return Array.from({ length: controls.count }, (_, index) => {
+      const offset = index - (controls.count - 1) / 2
+      return [offset * controls.radius * 2, 0, controls.glassZ]
+    })
+  }, [controls.count, controls.radius, controls.glassZ])
+
+  // Use instancing for better performance when enabled and count > 5
+  if (controls.useInstancing && controls.count > 5) {
+    return (
+      <group ref={groupRef}>
+        <Instances>
+          <cylinderGeometry args={[controls.radius, controls.radius, controls.height, controls.subdivisions]} />
+          {glassMaterial}
+          {cylinderPositions.map((position, index) => (
+            <Instance key={index} position={position} />
+          ))}
+        </Instances>
+      </group>
+    )
+  }
+
+  // Use individual meshes for smaller counts
   return (
     <group ref={groupRef}>
-      {Array.from({ length: controls.count }).map((_, index) => {
-        const offset = index - (controls.count - 1) / 2
-        const x = offset * controls.radius * 2
-        return (
-          <mesh key={index} position={[x, 0, controls.glassZ]}>
-            <cylinderGeometry args={[controls.radius, controls.radius, controls.height, controls.subdivisions]} />
-            <MeshTransmissionMaterial
-              transmission={controls.transmission}
-              thickness={controls.thickness}
-              roughness={controls.roughness}
-              envMap={scene.background}
-              envMapIntensity={controls.envMapIntensity}
-              clearcoat={controls.clearcoat}
-              clearcoatRoughness={controls.clearcoatRoughness}
-              ior={controls.ior}
-              reflectivity={controls.reflectivity}
-              color={controls.glassColor}
-              transparent={true}
-              chromaticAberration={0.2}
-              opacity={1.0}
-              
-            />
-          </mesh>
-        )
-      })}
+      {cylinderPositions.map((position, index) => (
+        <mesh 
+          key={index} 
+          position={position}
+          frustumCulled={true}
+          matrixAutoUpdate={false}
+        >
+          <cylinderGeometry args={[controls.radius, controls.radius, controls.height, controls.subdivisions]} />
+          {glassMaterial}
+        </mesh>
+      ))}
     </group>
   )
-}
+})
 
-function RotatingCube({ controls }) {
+const RotatingCube = memo(function RotatingCube({ controls }) {
   const meshRef = useRef()
   
+  // Memoize material with dependency tracking
+  const cubeMaterial = useMemo(() => (
+    <meshStandardMaterial 
+      color={controls.cubeColor} 
+      emissive={controls.cubeColor} 
+      emissiveIntensity={1} 
+    />
+  ), [controls.cubeColor])
+  
+  // Optimize animation - use requestAnimationFrame pattern
   useFrame((state) => {
     if (meshRef.current) {
-      meshRef.current.rotation.x = state.clock.elapsedTime * 0.1
-      meshRef.current.rotation.y = state.clock.elapsedTime * 0.1
-      meshRef.current.rotation.z = state.clock.elapsedTime * 0.1
+      const time = state.clock.elapsedTime * 0.2
+      meshRef.current.rotation.set(time, time, time)
     }
   })
 
   return (
-    <mesh ref={meshRef} position={[0, 0, controls.cubeZ]}>
-      <boxGeometry args={[6, 6, 6]} />
-      <meshStandardMaterial color={controls.cubeColor} emissive={controls.cubeColor} emissiveIntensity={1} />
+    <mesh 
+      ref={meshRef} 
+      position={[0, 0, controls.cubeZ]}
+      frustumCulled={true}
+      matrixAutoUpdate={true}
+    >
+      <boxGeometry args={[8, 8, 8]} />
+      {cubeMaterial}
     </mesh>
   )
-}
+})
 
 function Scene({ store }) {
   const controls = useControls({
@@ -79,7 +131,7 @@ function Scene({ store }) {
     }),
     Glass: folder({
       transmission: { value: 1, min: 0, max: 1, step: 0.01 },
-      thickness: { value: 1.22, min: 0, max: 5, step: 0.01 },
+      thickness: { value: 3.2, min: 0, max: 5, step: 0.01 },
       roughness: { value: 0.35, min: 0, max: 1, step: 0.01 },
       clearcoat: { value: 0.18, min: 0, max: 1, step: 0.01 },
       clearcoatRoughness: { value: 0.2, min: 0, max: 1, step: 0.01 },
@@ -90,7 +142,7 @@ function Scene({ store }) {
       chromaticAberration: { value: 0.2, min: 0, max: 4, step: 0.1 },
     }),
     Cylinder: folder({
-      count: { value: 10, min: 1, max: 20, step: 1 },
+      count: { value: 8, min: 1, max: 20, step: 1 },
       radius: { value: 0.66, min: 0.1, max: 1, step: 0.01 },
       height: { value: 29.8, min: 1, max: 40, step: 0.1 },
       subdivisions: { value: 8, min: 3, max: 64, step: 1 },
@@ -101,29 +153,70 @@ function Scene({ store }) {
       glassRotationZ: { value: 41, min: -180, max: 180, step: 1 },
     }),
     Performance: folder({
-      samples: { value: 16, min: 1, max: 32, step: 1 },
-      resolution: { value: 1024, min: 256, max: 2048, step: 256 },
+      samples: { value: 8, min: 1, max: 32, step: 1 },
+      resolution: { value: 512, min: 256, max: 2048, step: 256 },
+      enableShadows: { value: false },
+      pixelRatio: { value: 1, min: 0.5, max: 2, step: 0.1 },
+      frameloop: { options: ['always', 'demand', 'never'], value: 'demand' },
+      toneMappingExposure: { value: 1, min: 0.1, max: 3, step: 0.1 },
+      outputEncoding: { options: ['sRGB', 'Linear'], value: 'sRGB' },
+      useInstancing: { value: true },
+      culling: { value: true },
     }),
   }, { store })
 
   return (
-    <>
-      <color attach="background" args={[controls.backgroundColor]} />
-      <GlassStructure controls={controls} />
-      <RotatingCube controls={controls} />
-      <Environment preset="studio" background={false} />
-      <OrbitControls enablePan={false} enableZoom={true} />
-    </>
+          <>
+        <color attach="background" args={[controls.backgroundColor]} />
+        
+        {/* Soft ambient lighting for glass materials */}
+        <ambientLight intensity={0.8} />
+        <hemisphereLight 
+          skyColor="#ffffff" 
+          groundColor="#444444" 
+          intensity={0.6} 
+        />
+        <pointLight 
+          position={[5, 5, 5]} 
+          intensity={0.3}
+          distance={50}
+          decay={2}
+        />
+        <pointLight 
+          position={[-5, -5, 5]} 
+          intensity={0.2}
+          distance={50}
+          decay={2}
+        />
+        
+        <GlassStructure controls={controls} />
+        <RotatingCube controls={controls} />
+        <OrbitControls enablePan={false} enableZoom={true} />
+      </>
   )
 }
 
-export default function Component() {
+export default function App() {
   const store = useCreateStore()
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh' }}>
       <div style={{ flexGrow: 1, position: 'relative' }}>
-        <Canvas style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} camera={{ position: [0, 0, 16], fov: 50 }}>
+        <Canvas 
+          style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }} 
+          camera={{ position: [0, 0, 12], fov: 50 }}
+          gl={{ 
+            antialias: false, // Disable for better performance
+            alpha: false,
+            powerPreference: "high-performance",
+            stencil: false,
+            depth: true
+          }}
+          dpr={[1, 2]} // Limit device pixel ratio for performance
+          performance={{ min: 0.5 }} // Auto-adjust quality based on performance
+          frameloop="always" // Continuous rendering for animations
+          shadows={false}
+        >
           <Scene store={store} />
         </Canvas>
       </div>
