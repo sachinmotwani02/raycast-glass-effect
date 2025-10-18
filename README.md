@@ -1,6 +1,6 @@
-# Glass Refraction Gallery
+# Glass Refraction Effect
 
-![Glass Refraction Gallery Demo](https://example.com/demo.gif)
+[Glass Refraction Gallery Demo](https://x.com/i/status/1979432989516820820)
 
 An interactive 3D visualization showcasing the beauty of light refraction through glass-like materials.
 
